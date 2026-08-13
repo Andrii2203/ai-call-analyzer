@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "ai-call-analyzer"
+version = "0.1.0"
+description = "AI-powered sales call analyzer"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+azure-cognitiveservices-speech = "^1.35.0"
+groq = "^0.4.0"
+boto3 = "^1.34.0"
+pydantic = "^2.6.0"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+ruff = "^0.2.0"
+localstack = ">=3.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+select = ["E", "F", "B", "I"]
