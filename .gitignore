@@ -137,3 +137,6 @@ venv.bak/
 .idea/
 *.swp
 *.swo
+
+# LocalStack data volume (docker-compose.local.yml)
+infra/localstack/volume/

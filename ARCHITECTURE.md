@@ -1,5 +1,20 @@
 # ai-call-analyzer: Детальний план розробки
 
+## Статус на 22.09.2026
+
+Галочки в фазах нижче — первісний план; фактичний стан перевірено так:
+
+| Що | Стан | Чим перевірено |
+| :--- | :--- | :--- |
+| `poetry install` | ✅ | `poetry install` (Poetry 2.3.4, Python 3.12) |
+| LocalStack піднімається, бакет і таблиця створюються автоматично | ✅ | `docker compose ... up -d`, `docker exec localstack-main awslocal s3 ls` / `dynamodb list-tables` |
+| Lint | ✅ | `poetry run ruff check .` — 0 помилок |
+| Unit-тести | ✅ | `poetry run pytest tests/unit/` — 34 passed |
+| Інтеграційний тест (LocalStack, Azure і Groq замокані) | ✅ | `poetry run pytest tests/integration/` — 1 passed |
+| MP3 приймається Azure SDK | ✅ | декодування miniaudio → push-стрім; recognizer створюється |
+| Невірний ключ Azure → зрозуміла помилка без повторів | ✅ | запуск демо з фейковим ключем: `AuthenticationFailure (401)`, код виходу 1 |
+| Повний прогін з реальними Azure + Groq | ⏳ | потребує справжніх ключів у `.env` |
+
 ## 0. Контекст та обмеження
 
 ### Бізнес-проблема
@@ -11,7 +26,7 @@ Sales-менеджери не мають об'єктивної оцінки як
 
 ### Вихід
 - Транскрипція аудіо в текст (Azure Speech Services)
-- Оцінка якості дзвінка 0-100 (Groq API / Llama 3.3)
+- Оцінка якості дзвінка 0-100 (Groq API, модель `openai/gpt-oss-120b`)
 - Структурований JSON-результат: `{ "transcript": "...", "score": 85, "reasoning": "..." }`
 - Lambda-подібна структура проекту (готовність до деплою в AWS)
 - Локальне AWS-оточення (LocalStack: S3, DynamoDB)
@@ -19,7 +34,7 @@ Sales-менеджери не мають об'єктивної оцінки як
 
 ### Обмеження (прийняті як даність)
 - Локальний запуск через Python-скрипти (без реального AWS)
-- LocalStack для емуляції AWS-сервісів (безкоштовно, локально)
+- LocalStack для емуляції AWS-сервісів (безкоштовно, локально; образ закріплено на `4.14.0`, бо новіші з 23.03.2026 вимагають auth token)
 - Один користувач, без авторизації
 - Без реального деплою в AWS (тільки локальна демонстрація)
 - Використання безкоштовних API-ключів (Azure Speech Free Tier, Groq Free Tier)
@@ -29,8 +44,10 @@ Sales-менеджери не мають об'єктивної оцінки як
 | Рішення | Альтернатива | Чому обрали |
 | :--- | :--- | :--- |
 | **Azure Speech Services** | AWS Transcribe | Безкоштовний tier (5 годин/міс), краща діаризація |
-| **Groq API (Llama 3.3)** | Azure OpenAI | Безкоштовний tier (30 запитів/хв), не потребує реєстрації в Azure OpenAI |
-| **LocalStack** | Реальний AWS | Безкоштовно, працює локально, не потребує кредитної картки |
+| **Groq API (`openai/gpt-oss-120b`)** | Azure OpenAI | Безкоштовний tier, не потребує реєстрації в Azure OpenAI. Llama 3.3 70B, з якої починали, Groq вимкнув 16.08.2026; модель задається через `GROQ_MODEL` |
+| **LocalStack 4.14.0** | Реальний AWS | Безкоштовно, працює локально, не потребує кредитної картки |
+| **miniaudio: MP3/WAV → 16 кГц моно PCM** | GStreamer + стиснений потік Azure | Ставиться через pip без системних бібліотек; `AudioConfig(filename=...)` в Azure SDK приймає лише WAV |
+| **`meeting_id` = SHA-256 вмісту аудіо** | `uuid4()` на кожен запуск | Той самий запис → той самий ID → транскрипт і оцінка з кешу, без повторної оплати API |
 | **Lambda-подібна структура** | Монолітний скрипт | Демонструє розуміння serverless-архітектури |
 | **Structured JSON-логи** | `print()` | Готовність до CloudWatch, легше дебажити |
 | **Exponential backoff** | Фіксований retry | Production-патерн, запобігає rate limiting |
@@ -47,11 +64,12 @@ Sales-менеджери не мають об'єктивної оцінки як
 ├── .env.example                 # Всі змінні середовища з описами
 ├── pyproject.toml               # Poetry: залежності, налаштування
 ├── .gitignore                   # Виключення для Git
+├── .gitattributes               # LF для *.sh (скрипт виконується в Linux-контейнері)
 │
 ├── /infra                       # Локальна інфраструктура
 │   └── /localstack
-│       ├── docker-compose.local.yml   # LocalStack (S3, DynamoDB)
-│       └── init-aws.sh                # Ініціалізація бакетів і таблиць
+│       ├── docker-compose.local.yml   # LocalStack 4.14.0 (S3, DynamoDB)
+│       └── init-aws.sh                # Бакет і таблиця, виконується автоматично (ready.d)
 │
 ├── /src                         # Основний код
 │   ├── /lambdas
@@ -67,22 +85,29 @@ Sales-менеджери не мають об'єктивної оцінки як
 │   │
 │   └── /utils
 │       ├── __init__.py
+│       ├── audio.py             # MP3/WAV → 16 кГц моно PCM, meeting_id з хешу файлу
+│       ├── aws_config.py        # Спільні налаштування boto3 (LocalStack / AWS)
 │       ├── logger.py            # Structured JSON-логи
 │       ├── retry.py             # Exponential backoff
 │       ├── s3_utils.py          # S3 download/upload (LocalStack)
 │       └── dynamodb_utils.py    # DynamoDB idempotency
 │
 ├── /tests                       # Всі тести
+│   ├── /fixtures
+│   │   └── tone.mp3             # 1 с, 44.1 кГц стерео — перевірка декодування
 │   ├── /unit
+│   │   ├── test_audio.py        # Декодування і meeting_id
+│   │   ├── test_transcribe.py   # L2: успіх, помилки Azure, повтори, таймаут
+│   │   ├── test_score.py        # L4: модель, повтори, схема відповіді, кеш
 │   │   ├── test_retry.py        # Тести retry-логіки
 │   │   ├── test_logger.py       # Тести логера
 │   │   └── test_models.py       # Тести Pydantic-моделей
 │   │
 │   └── /integration
-│       └── test_pipeline.py     # Повний пайплайн з LocalStack
+│       └── test_pipeline.py     # Повний пайплайн з LocalStack, повторний запуск з кешу
 │
 ├── /demo                        # Демо-скрипти
-│   ├── test_call.mp3            # Тестовий аудіофайл
+│   ├── test_call.mp3            # Синтетичний sales-дзвінок, 82 с (голос Windows)
 │   └── run_pipeline.py          # Запуск повного пайплайну локально
 │
 ├── /scripts                     # Допоміжні скрипти
@@ -90,7 +115,7 @@ Sales-менеджери не мають об'єктивної оцінки як
 │
 └── /.github
     └── /workflows
-        └── ci.yml               # Lint + test на кожен push
+        └── ci.yml               # Lint + unit + integration (LocalStack) на кожен push
 ```
 
 ---
@@ -109,7 +134,7 @@ Sales-менеджери не мають об'єктивної оцінки як
 def handler(audio_path: str) -> dict:
     transcript = transcribe_audio(audio_path)
     return {
-        "meeting_id": generate_meeting_id(),
+        "meeting_id": meeting_id_for(audio_path),  # SHA-256 вмісту файлу
         "transcript": transcript,
         "word_count": len(transcript.split()),
         "status": "transcribed"
@@ -194,9 +219,9 @@ s3://sales-score-dev/
 
 **✅ Acceptance Criteria:**
 - [ ] `poetry install` встановлює всі залежності без конфліктів
-- [ ] `docker-compose -f infra/localstack/docker-compose.local.yml up -d` піднімає LocalStack
-- [ ] `awslocal s3 ls` показує порожні бакети після `init-aws.sh`
-- [ ] `awslocal dynamodb list-tables` показує `SalesScores`
+- [ ] `docker compose -f infra/localstack/docker-compose.local.yml up -d` піднімає LocalStack (init-aws.sh виконується автоматично)
+- [ ] `docker exec localstack-main awslocal s3 ls` показує бакет `sales-score-dev`
+- [ ] `docker exec localstack-main awslocal dynamodb list-tables` показує `SalesScores`
 - [ ] `.env` створено з реальними ключами (Azure Speech, Groq)
 
 **Оцінка часу:** 2 години
@@ -227,7 +252,7 @@ s3://sales-score-dev/
 
 **Що робимо:**
 1. `src/lambdas/score/handler.py`: функція `score_transcript(transcript)`
-2. Інтеграція з Groq API (Llama 3.3 70B)
+2. Інтеграція з Groq API (`openai/gpt-oss-120b`; Llama 3.3 70B вимкнено в Groq 16.08.2026)
 3. Structured output: JSON з полями `score` (int) і `reasoning` (str)
 4. `src/utils/dynamodb_utils.py`: перевірка ідемпотентності, збереження результату
 5. `src/utils/s3_utils.py`: збереження результату в S3
@@ -253,11 +278,11 @@ s3://sales-score-dev/
 4. **Інтеграційний тест:** `tests/integration/test_pipeline.py` з LocalStack
 
 **✅ Acceptance Criteria:**
-- [ ] `python demo/run_pipeline.py --audio test_call.mp3` виконується без помилок
+- [ ] `poetry run python demo/run_pipeline.py --audio demo/test_call.mp3` виконується без помилок
 - [ ] У S3 створено файли `transcripts/raw/{meeting_id}/transcript.json` і `scores/{meeting_id}/score.json`
 - [ ] У DynamoDB створено запис з score
-- [ ] Повторний запуск з тим самим `meeting_id` → **не викликає** Groq API (ідемпотентність)
-- [ ] `python scripts/estimate_cost.py` показує вартість <$0.05/дзвінок
+- [ ] Повторний запуск на тому ж файлі (той самий `meeting_id`) → **не викликає** ні Azure, ні Groq (ідемпотентність)
+- [ ] `python scripts/estimate_cost.py` показує вартість <$0.05/дзвінок (за ціною Azure ~$1/год це дзвінки до ~3 хв; 5-хв дзвінок коштує ~$0.08 лише на Azure)
 - [ ] Інтеграційний тест проходить
 
 **Оцінка часу:** 2 години
@@ -338,13 +363,12 @@ s3://sales-score-dev/
 # 2. Встановити залежності
 poetry install
 
-# 3. Запустити LocalStack
-docker-compose -f infra/localstack/docker-compose.local.yml up -d
-./infra/localstack/init-aws.sh
+# 3. Запустити LocalStack (бакет і таблиця створюються автоматично)
+docker compose -f infra/localstack/docker-compose.local.yml up -d
 
 # 4. Написати L2 Lambda
 # src/lambdas/transcribe/handler.py
 
 # 5. Протестувати L2 локально
-python -c "from src.lambdas.transcribe.handler import transcribe_audio; print(transcribe_audio('demo/test_call.mp3'))"
+poetry run python -c "from src.lambdas.transcribe.handler import transcribe_audio; print(transcribe_audio('demo/test_call.mp3'))"
 ```

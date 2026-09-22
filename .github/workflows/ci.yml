@@ -10,35 +10,91 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v7
+
     - name: Set up Python
-      uses: actions/setup-python@v5
+      id: setup-python
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
-        
+
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
+        version: 2.3.4
         virtualenvs-create: true
         virtualenvs-in-project: true
-        
+
     - name: Load cached venv
       id: cached-poetry-dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .venv
         key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-        
+
     - name: Install dependencies
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
       run: poetry install --no-interaction --no-root
-      
+
     - name: Install project
       run: poetry install --no-interaction
-      
+
     - name: Lint with ruff
       run: poetry run ruff check .
-      
+
     - name: Run unit tests
       run: poetry run pytest tests/unit/
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        # Same pinned image as infra/localstack: newer tags need a LocalStack auth token
+        image: localstack/localstack:4.14.0
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: s3,dynamodb
+    env:
+      LOCALSTACK_ENDPOINT: http://localhost:4566
+      REQUIRE_LOCALSTACK: "1"
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Python
+      id: setup-python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 2.3.4
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v6
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+    - name: Install dependencies
+      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+      run: poetry install --no-interaction --no-root
+
+    - name: Install project
+      run: poetry install --no-interaction
+
+    - name: Wait for LocalStack
+      run: |
+        for i in $(seq 1 30); do
+          curl -sf http://localhost:4566/_localstack/health && exit 0
+          sleep 2
+        done
+        echo "LocalStack did not become healthy" && exit 1
+
+    - name: Run integration tests
+      run: poetry run pytest tests/integration/

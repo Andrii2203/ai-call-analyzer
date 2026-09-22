@@ -1,7 +1,8 @@
-import time
-import random
 import functools
-from typing import Callable, Any, Tuple, Type
+import random
+import time
+from typing import Any, Callable, Tuple, Type
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__, component="RETRY")
@@ -36,7 +37,9 @@ def exponential_backoff(
                     retries += 1
                     func_name = getattr(func, "__name__", str(func))
                     if retries > max_retries:
-                        logger.error(f"Max retries ({max_retries}) reached for {func_name}. Error: {str(e)}")
+                        logger.error(
+                            f"Max retries ({max_retries}) reached for {func_name}. Error: {str(e)}"
+                        )
                         raise e
                     
                     # Calculate wait time

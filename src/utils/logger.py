@@ -1,8 +1,7 @@
-import sys
 import json
 import logging
+import sys
 from datetime import datetime, timezone
-from typing import Any
 
 
 class JsonFormatter(logging.Formatter):

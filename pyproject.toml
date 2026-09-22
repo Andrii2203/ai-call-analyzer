@@ -2,7 +2,7 @@
 name = "ai-call-analyzer"
 version = "0.1.0"
 description = "AI-powered sales call analyzer"
-authors = ["Your Name <you@example.com>"]
+authors = ["Andrii"]
 readme = "README.md"
 packages = [{include = "src"}]
 
@@ -13,6 +13,7 @@ groq = "^0.4.0"
 boto3 = "^1.34.0"
 pydantic = "^2.6.0"
 python-dotenv = "^1.0.1"
+miniaudio = "^1.71"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
@@ -26,4 +27,6 @@ build-backend = "poetry.core.masonry.api"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
 select = ["E", "F", "B", "I"]

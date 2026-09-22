@@ -1,6 +1,10 @@
+from datetime import datetime, timezone
+
 from pydantic import BaseModel, Field
-from typing import Optional
-from datetime import datetime
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class TranscriptionResponse(BaseModel):
@@ -8,7 +12,7 @@ class TranscriptionResponse(BaseModel):
     transcript: str
     word_count: int
     status: str = "transcribed"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utc_now)
 
 
 class ScoringResponse(BaseModel):
@@ -16,4 +20,4 @@ class ScoringResponse(BaseModel):
     score: int = Field(ge=0, le=100)
     reasoning: str
     status: str = "scored"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utc_now)
